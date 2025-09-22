@@ -3,6 +3,8 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 function applylunch_install(){
   global $wpdb;
+
+  // Jobs table
   $table = $wpdb->prefix . 'applylaunch_jobs';
   $charset = $wpdb->get_charset_collate();
   $sql = "CREATE TABLE $table (
@@ -24,9 +26,25 @@ function applylunch_install(){
     KEY applied_date (applied_date),
     KEY status (status)
   ) $charset;";
+
   require_once ABSPATH.'wp-admin/includes/upgrade.php';
   dbDelta($sql);
 
+  // Goals table
+  $goals_table = $wpdb->prefix . 'applylaunch_goals';
+  $sql2 = "CREATE TABLE $goals_table (
+    id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+    customer_id BIGINT(20) UNSIGNED NOT NULL,
+    employee_id BIGINT(20) UNSIGNED NOT NULL,
+    goal_count INT NOT NULL DEFAULT 0,
+    goal_period ENUM('day','week','month') NOT NULL DEFAULT 'week',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY unique_goal (customer_id, employee_id, goal_period)
+  ) $charset;";
+  dbDelta($sql2);
+
+  // Roles
   add_role('applylunch_customer', 'ApplyLaunch Customer', ['read'=>true]);
   add_role('applylunch_employee', 'ApplyLaunch Agent', ['read'=>true]);
   add_role('applylunch_superadmin', 'ApplyLaunch Super Admin', ['read'=>true, 'list_users'=>true, 'edit_users'=>true]);
