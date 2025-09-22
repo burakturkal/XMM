@@ -1,54 +1,51 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-function al_table(){ global $wpdb; return $wpdb->prefix.'applylaunch_jobs'; }
-function al_is_role($u,$r){ return in_array($r,(array)$u->roles,true); }
-
-function al_normalize_url($raw){
-  $raw = trim((string)$raw);
-  if ($raw === '') return '';
-  if (!preg_match('~^https?://~i', $raw)) $raw = 'https://' . $raw;
-  $raw = preg_replace('~\s+~', '', $raw);
-  return esc_url_raw($raw);
-}
-
-function al_prepare($sql, $params=array()){
+function applylunch_install(){
   global $wpdb;
-  if(empty($params)) return $sql;
-  return $wpdb->prepare($sql, $params);
-}
 
-function al_paginated_jobs($where_sql, $where_params, $order_sql=' ORDER BY applied_date DESC, id DESC ', $page=1, $per=50){
-  global $wpdb; $t = al_table();
-  $page = max(1, intval($page)); 
-  $per  = min(100, max(10, intval($per)));
-  $offset = ($page-1)*$per;
+  // Jobs table
+  $table = $wpdb->prefix . 'applylaunch_jobs';
+  $charset = $wpdb->get_charset_collate();
+  $sql = "CREATE TABLE $table (
+    id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+    customer_id BIGINT(20) UNSIGNED NOT NULL,
+    employee_id BIGINT(20) UNSIGNED NOT NULL,
+    job_title VARCHAR(255) NOT NULL,
+    company VARCHAR(255),
+    location VARCHAR(255),
+    website VARCHAR(255),
+    applied_date DATE,
+    status VARCHAR(50),
+    notes TEXT,
+    meta LONGTEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY customer_id (customer_id),
+    KEY employee_id (employee_id),
+    KEY applied_date (applied_date),
+    KEY status (status)
+  ) $charset;";
 
-  $sql_count = "SELECT COUNT(*) FROM $t $where_sql";
-  $total = (int)$wpdb->get_var( al_prepare($sql_count, $where_params) );
+  require_once ABSPATH.'wp-admin/includes/upgrade.php';
+  dbDelta($sql);
 
-  $sql_rows = "SELECT * FROM $t $where_sql $order_sql LIMIT %d OFFSET %d";
-  $args = array_merge($where_params, array($per, $offset));
-  $rows = $wpdb->get_results( $wpdb->prepare($sql_rows, $args) );
+  // Goals table
+  $goals_table = $wpdb->prefix . 'applylaunch_goals';
+  $sql2 = "CREATE TABLE $goals_table (
+    id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+    customer_id BIGINT(20) UNSIGNED NOT NULL,
+    employee_id BIGINT(20) UNSIGNED NOT NULL,
+    goal_count INT NOT NULL DEFAULT 0,
+    goal_period ENUM('day','week','month') NOT NULL DEFAULT 'week',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY unique_goal (customer_id, employee_id, goal_period)
+  ) $charset;";
+  dbDelta($sql2);
 
-  $pages = max(1, ceil($total/$per));
-  return array($rows, $total, $pages, $page, $per);
-}
-
-function al_counts_by_range($jobs,$range){
-  $out = []; $now = current_time('timestamp');
-  if($range==='7'){
-    for($i=6;$i>=0;$i--){ $d=date('Y-m-d', strtotime("-{$i} days", $now)); $out[$d]=0; }
-    foreach($jobs as $j){ if(!empty($j->applied_date) && isset($out[$j->applied_date])) $out[$j->applied_date]++; }
-  } elseif($range==='30'){
-    for($i=29;$i>=0;$i--){ $d=date('Y-m-d', strtotime("-{$i} days", $now)); $out[$d]=0; }
-    foreach($jobs as $j){ if(!empty($j->applied_date) && isset($out[$j->applied_date])) $out[$j->applied_date]++; }
-  } elseif($range==='12'){
-    for($i=11;$i>=0;$i--){ $m=date('Y-m', strtotime("-{$i} months", $now)); $out[$m]=0; }
-    foreach($jobs as $j){ if(!empty($j->applied_date)){ $m=substr($j->applied_date,0,7); if(isset($out[$m])) $out[$m]++; } }
-  } else { // 6m default
-    for($i=5;$i>=0;$i--){ $m=date('Y-m', strtotime("-{$i} months", $now)); $out[$m]=0; }
-    foreach($jobs as $j){ if(!empty($j->applied_date)){ $m=substr($j->applied_date,0,7); if(isset($out[$m])) $out[$m]++; } }
-  }
-  return $out;
+  // Roles
+  add_role('applylunch_customer', 'ApplyLaunch Customer', ['read'=>true]);
+  add_role('applylunch_employee', 'ApplyLaunch Agent', ['read'=>true]);
+  add_role('applylunch_superadmin', 'ApplyLaunch Super Admin', ['read'=>true, 'list_users'=>true, 'edit_users'=>true]);
 }
