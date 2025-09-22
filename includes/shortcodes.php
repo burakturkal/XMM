@@ -4,7 +4,9 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 /* Chart helper */
 function al_render_chart($id,$labels,$data,$title){
   $pretty=[];
-  foreach($labels as $lab){ $pretty[] = (strlen($lab)===7)? date_i18n('M y', strtotime($lab.'-01')) : date_i18n('M j', strtotime($lab)); }
+  foreach($labels as $lab){
+    $pretty[] = (strlen($lab)===7)? date_i18n('M y', strtotime($lab.'-01')) : date_i18n('M j', strtotime($lab));
+  }
   $labels_json = wp_json_encode(array_values($pretty));
   $data_json = wp_json_encode(array_values($data));
   ob_start(); ?>
@@ -45,9 +47,9 @@ add_action('wp_ajax_al_dedupe_check', function(){
   $like_title = '%'.$wpdb->esc_like($title).'%';
   $like_company = '%'.$wpdb->esc_like($company).'%';
   $cnt = $wpdb->get_var($wpdb->prepare("
-    SELECT COUNT(*) FROM $t
-     WHERE customer_id=%d AND applied_date>=%s
-       AND (job_title LIKE %s OR company LIKE %s OR website=%s)
+    SELECT COUNT(*) FROM $t 
+    WHERE customer_id=%d AND applied_date>=%s 
+      AND (job_title LIKE %s OR company LIKE %s OR website=%s)
   ", $customer, $since, $like_title, $like_company, $website));
   wp_send_json_success(['count'=>intval($cnt)]);
 });
@@ -56,7 +58,10 @@ add_action('wp_ajax_al_dedupe_check', function(){
 add_shortcode('applylunch_customer_dashboard', function(){
   if(!is_user_logged_in()) return '<p>Please log in.</p>';
   $u=wp_get_current_user(); global $wpdb; $t=al_table();
-  $q = sanitize_text_field($_GET['q']??''); $page=max(1,intval($_GET['p']??1)); $per=min(100,max(10,intval($_GET['per']??50)));
+
+  $q = sanitize_text_field($_GET['q']??'');
+  $page=max(1,intval($_GET['p']??1));
+  $per=min(100,max(10,intval($_GET['per']??50)));
   $where="WHERE customer_id=%d"; $params=[$u->ID];
   if($q!==''){ $where.=" AND (job_title LIKE %s OR company LIKE %s)"; $like='%'.$wpdb->esc_like($q).'%'; array_push($params,$like,$like); }
   list($rows,$total,$pages,$page,$per) = al_paginated_jobs($where,$params,' ORDER BY applied_date DESC, id DESC ',$page,$per);
@@ -90,7 +95,6 @@ add_shortcode('applylunch_customer_dashboard', function(){
     </div>
     <?php echo al_render_chart('al_cust_chart',$labels,$data,'Applications'); ?>
   </div>
-
   <div class="al-card">
     <h3>Applications</h3>
     <div class="al-table-wrap">
@@ -119,12 +123,13 @@ add_shortcode('applylunch_customer_dashboard', function(){
   <?php return ob_get_clean();
 });
 
-/* ===== EMPLOYEE DASHBOARD (Add job + chart + table) ===== */
+/* ===== EMPLOYEE DASHBOARD ===== */
 add_shortcode('applylunch_employee_dashboard', function(){
   if(!is_user_logged_in()) return '<p>Please log in.</p>';
-  $u=wp_get_current_user(); if(!(al_is_role($u,'applylunch_employee')||al_is_role($u,'applylaunch_employee')||al_is_role($u,'applylunch_superadmin')||al_is_role($u,'applylaunch_superadmin'))) return '<p>No permission.</p>';
-  global $wpdb; $t=al_table();
+  $u=wp_get_current_user();
+  if(!(al_is_role($u,'applylunch_employee')||al_is_role($u,'applylaunch_employee')||al_is_role($u,'applylunch_superadmin')||al_is_role($u,'applylaunch_superadmin'))) return '<p>No permission.</p>';
 
+  global $wpdb; $t=al_table();
   $notice='';
   if(isset($_POST['al_add_job']) && wp_verify_nonce($_POST['al_nonce']??'','al_add_job')){
     $cid=intval($_POST['customer_id']??0);
@@ -153,11 +158,9 @@ add_shortcode('applylunch_employee_dashboard', function(){
   } else {
     $chart_rows = $wpdb->get_results($wpdb->prepare("SELECT applied_date, COUNT(*) as cnt FROM $t WHERE employee_id=%d AND applied_date >= %s GROUP BY applied_date ORDER BY applied_date ASC", $u->ID, $since_30));
   }
+
   $labels=[]; $data=[];
-  for($i=29;$i>=0;$i--){
-    $d = date('Y-m-d', strtotime("-{$i} days", current_time('timestamp')));
-    $labels[]=$d; $data[$d]=0;
-  }
+  for($i=29;$i>=0;$i--){ $d = date('Y-m-d', strtotime("-{$i} days", current_time('timestamp'))); $labels[]=$d; $data[$d]=0; }
   foreach($chart_rows as $r){ if(isset($data[$r->applied_date])) $data[$r->applied_date]=(int)$r->cnt; }
 
   ob_start(); ?>
@@ -183,13 +186,31 @@ add_shortcode('applylunch_employee_dashboard', function(){
           <button class="al-btn al-sticky-add" type="submit" name="al_add_job">Save</button>
         </form>
       </div>
-
       <div class="al-card">
         <h3>My Activity (last 30 days)</h3>
         <?php echo al_render_chart('al_emp_chart', $labels, array_values($data), 'Applications'); ?>
       </div>
+      <div class="al-card">
+        <h3>My Goals</h3>
+        <table class="al-table">
+          <thead><tr><th>Customer</th><th>Period</th><th>Progress</th></tr></thead>
+          <tbody>
+            <?php foreach($customers as $c): 
+              foreach(['day','week','month'] as $period):
+                $prog=al_progress_against_goal($c->ID,$u->ID,$period);
+                if($prog['goal']>0): ?>
+                  <tr>
+                    <td><?php echo esc_html($c->display_name?:$c->user_login); ?></td>
+                    <td><?php echo ucfirst($period); ?></td>
+                    <td><?php echo $prog['count'].' / '.$prog['goal']; ?></td>
+                  </tr>
+                <?php endif;
+              endforeach;
+            endforeach; ?>
+          </tbody>
+        </table>
+      </div>
     </div>
-
     <div class="al-col">
       <div class="al-card">
         <div class="al-flex">
@@ -224,17 +245,16 @@ add_shortcode('applylunch_employee_dashboard', function(){
   <?php return ob_get_clean();
 });
 
-/* ===== SUPERADMIN DASHBOARD (stats + charts + global table + User Manager) ===== */
+/* ===== SUPERADMIN DASHBOARD ===== */
 add_shortcode('applylunch_superadmin_dashboard', function(){
   if(!is_user_logged_in()) return '<p>Please log in.</p>';
   $u=wp_get_current_user(); 
   if(!(al_is_role($u,'applylunch_superadmin')||al_is_role($u,'applylaunch_superadmin'))) return '<p>No permission.</p>';
-  global $wpdb; $t=al_table();
 
+  global $wpdb; $t=al_table();
   $today = date('Y-m-d', current_time('timestamp'));
   $week_start = date('Y-m-d', strtotime('monday this week', current_time('timestamp')));
   $month_start = date('Y-m-01', current_time('timestamp'));
-
   $total_all   = (int)$wpdb->get_var("SELECT COUNT(*) FROM $t");
   $total_week  = (int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $t WHERE applied_date >= %s", $week_start));
   $total_month = (int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $t WHERE applied_date >= %s", $month_start));
@@ -268,6 +288,7 @@ add_shortcode('applylunch_superadmin_dashboard', function(){
       GROUP BY j.employee_id
       ORDER BY cnt DESC
   ", $since_30));
+
   $agent_labels = array_map(function($r){ return $r->name ? $r->name : '#'.$r->employee_id; }, $per_agent);
   $agent_counts = array_map(function($r){ return (int)$r->cnt; }, $per_agent);
 
@@ -292,12 +313,10 @@ add_shortcode('applylunch_superadmin_dashboard', function(){
         <div class="al-card"><strong>This Month</strong><div style="font-size:1.6rem"><?php echo esc_html($total_month); ?></div></div>
       </div>
     </div>
-
     <div class="al-card">
       <div class="al-flex"><h3>Applications (last 30d) by Agent</h3></div>
       <?php echo al_render_chart('al_admin_agents_chart', $agent_labels, $agent_counts, 'By Agent'); ?>
     </div>
-
     <div class="al-card">
       <div class="al-grid" style="grid-template-columns:1fr 1fr">
         <div>
@@ -318,7 +337,6 @@ add_shortcode('applylunch_superadmin_dashboard', function(){
         </div>
       </div>
     </div>
-
     <div class="al-card">
       <div class="al-flex">
         <h3>All Applications</h3>
@@ -351,7 +369,28 @@ add_shortcode('applylunch_superadmin_dashboard', function(){
         <?php endfor; endif; ?>
       </div>
     </div>
-
+    <div class="al-card">
+      <h3>Agent Goals Tracking</h3>
+      <table class="al-table">
+        <thead><tr><th>Agent</th><th>Customer</th><th>Period</th><th>Progress</th></tr></thead>
+        <tbody>
+          <?php
+          $agents=get_users(['role__in'=>['applylunch_employee','applylaunch_employee'],'number'=>999]);
+          $customers=get_users(['role__in'=>['applylunch_customer','applylaunch_customer'],'number'=>999]);
+          foreach($agents as $a){
+            foreach($customers as $c){
+              foreach(['day','week','month'] as $period){
+                $prog=al_progress_against_goal($c->ID,$a->ID,$period);
+                if($prog['goal']>0){
+                  echo '<tr><td>'.esc_html($a->display_name).'</td><td>'.esc_html($c->display_name).'</td><td>'.ucfirst($period).'</td><td>'.$prog['count'].' / '.$prog['goal'].'</td></tr>';
+                }
+              }
+            }
+          }
+          ?>
+        </tbody>
+      </table>
+    </div>
     <div class="al-card">
       <?php echo applylunch_um_render(); ?>
     </div>
